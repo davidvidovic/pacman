@@ -12,6 +12,9 @@
 // For usleep
 #include <unistd.h>
 
+// For OMP
+#include <omp.h>
+
 //using namespace cv;
 //using namespace std;
 
@@ -51,7 +54,7 @@ int *x_ghost, *y_ghost;
 int *ghost_dir;
 
 // Var to keep score of game
-unsigned char game_over = 0;
+int game_over = 0;
 
 void create_map()
 {
@@ -81,11 +84,12 @@ void create_object(int *target_x, int *target_y, int r, int g, int b)
 	*target_y = local_y;
 }
 
+
 int move_pacman()
 {
 	// Wait for a key press
-	int key = cv::waitKey(0);
-	
+	int key = cv::waitKey(100);
+	//std::cout << key << std::endl;
 	// Reset the old pixel to white
 	maze.at<cv::Vec3b>(x, y) = cv::Vec3b(255, 255, 255); 
 
@@ -93,31 +97,39 @@ int move_pacman()
 	switch (key) {
 	case 27: // ESC key
 		return 0;
-
+	
+	case 'w':
+	case 'W':
 	case 82: // Up arrow key
-		if(x > 0 && maze.at<cv::Vec3b>(x-1, y) == cv::Vec3b(255, 255, 255)) x--;
-		else if(x == 0 && maze.at<cv::Vec3b>(maze.rows-1, y) == cv::Vec3b(255, 255, 255)) x = maze.rows-1;
+		if(x > 0 && maze.at<cv::Vec3b>(x-1, y) != cv::Vec3b(0, 0, 0)) x--;
+		else if(x == 0 && maze.at<cv::Vec3b>(maze.rows-1, y) != cv::Vec3b(0, 0, 0)) x = maze.rows-1;
 	break;
 
+	case 's':
+	//case 'S':
 	case 84: // Down arrow key
-		if(x < (maze.rows-1) && maze.at<cv::Vec3b>(x+1, y) == cv::Vec3b(255, 255, 255)) x++;
-		else if(x == (maze.rows-1) && maze.at<cv::Vec3b>(0, y) == cv::Vec3b(255, 255, 255)) x = 0;
+		if(x < (maze.rows-1) && maze.at<cv::Vec3b>(x+1, y) != cv::Vec3b(0, 0, 0)) x++;
+		else if(x == (maze.rows-1) && maze.at<cv::Vec3b>(0, y) != cv::Vec3b(0, 0, 0)) x = 0;
 	break;
 
+	case 'a':
+	case 'A':
 	case 81: // Left arrow key
-		if (y > 0  && maze.at<cv::Vec3b>(x, y-1) == cv::Vec3b(255, 255, 255)) y--;
-		else if(y == 0 && maze.at<cv::Vec3b>(x, maze.cols-1) == cv::Vec3b(255, 255, 255)) y = maze.cols-1;
+		if (y > 0  && maze.at<cv::Vec3b>(x, y-1) != cv::Vec3b(0, 0, 0)) y--;
+		else if(y == 0 && maze.at<cv::Vec3b>(x, maze.cols-1) != cv::Vec3b(0, 0, 0)) y = maze.cols-1;
 	break;
 
+	case 'd':
+	case 'D':
 	case 83: // Right arrow key
-		if (y < (maze.cols-1)  && maze.at<cv::Vec3b>(x, y+1) == cv::Vec3b(255, 255, 255)) y++;
-		else if(y == (maze.cols-1) && maze.at<cv::Vec3b>(x, 0) == cv::Vec3b(255, 255, 255)) y = 0;
+		if (y < (maze.cols-1)  && maze.at<cv::Vec3b>(x, y+1) != cv::Vec3b(0, 0, 0)) y++;
+		else if(y == (maze.cols-1) && maze.at<cv::Vec3b>(x, 0) != cv::Vec3b(0, 0, 0)) y = 0;
 	break;
 
 	default:
 		// Check if the window is closed by X icon
 		if(cv::getWindowProperty("pacman", cv::WND_PROP_AUTOSIZE) == -1) 
-		return 0;
+			return 0;
 	break;
 	}
 	
@@ -200,6 +212,8 @@ int check_game()
 	return 1;
 }
 
+
+
 int main(int argc, char** argv )
 {
 	std::srand(static_cast<unsigned int>(std::time(nullptr)));
@@ -225,23 +239,86 @@ int main(int argc, char** argv )
 	// Create window for game
 	cv::namedWindow("pacman", cv::WINDOW_NORMAL);
 	cv::resizeWindow("pacman", 1080, 720); // set to 1080x720 HD
+	cv::imshow("pacman", maze);
 	
 	// Game
-	do
+	/*do
 	{	
 		cv::imshow("pacman", maze);	
 		move_ghosts();	
 		if(!check_game()) break;
 	}
-	while(move_pacman());
+	while(move_pacman());*/
 	
+	#pragma omp parallel sections num_threads(4) shared(maze, game_over)
+	{
+	
+	#pragma omp section
+	{
+		while(!game_over)
+		{
+			#pragma omp critical
+			{
+			cv::imshow("pacman", maze);
+			}
+			cv::waitKey(100); 
+			std::cout << "screen refresh" << std::endl;
+		}
+	}
+	
+	
+	#pragma omp section
+	{
+		while(true)
+		{
+			#pragma omp critical
+			{
+			if(!move_pacman()) game_over = 1;
+			}
+			cv::waitKey(100); 
+			std::cout << "pacman" << std::endl;
+		}
+	}
+	
+	
+	#pragma omp section
+	{
+		while(!game_over)
+		{
+			#pragma omp critical
+			{
+			move_ghosts();
+			}
+			cv::waitKey(300); 
+			std::cout << "ghosts" << std::endl;
+		}
+	}
+	
+	
+	#pragma omp section
+	{
+		while(!game_over)
+		{
+			#pragma omp critical
+			{
+			check_game();
+			}	
+			cv::waitKey(100); 
+			std::cout << "check" << std::endl;
+		}
+	}
+	
+	}	
+		
+	
+	
+	
+	// Game is over, pacman was eaten
+	// Display GAME OVER and wait for key ESC or to shut down window
 	if(game_over)
 	{
-		std::string text = "GAME";
-		cv::putText(maze, text, cv::Point(1,10), cv::FONT_HERSHEY_SIMPLEX, 0.25, cv::Scalar(0, 0, 255), 1, false);
-		text = "OVER";
-		cv::putText(maze, text, cv::Point(1,18), cv::FONT_HERSHEY_SIMPLEX, 0.25, cv::Scalar(0, 0, 255), 1, false);
-		cv::imshow("pacman", maze);
+		cv::Mat gameover_mat = cv::imread("./gameover.jpg", cv::IMREAD_COLOR);
+		cv::imshow("pacman", gameover_mat);
 		
 		while(1)
 		{
