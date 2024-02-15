@@ -18,7 +18,8 @@
 //using namespace cv;
 //using namespace std;
 
-const bool mazeMatrix[21][21] = {
+
+int mazeMatrix[21][21] = {
 	{0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0},
 	{0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0},
 	{0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0},
@@ -48,24 +49,34 @@ int x, y;
 // Game's maze
 cv::Mat maze(21, 21, CV_8UC3, cv::Scalar(0,0,0));
 
+// Goal holds number of gray pixels that pacman can eat
+// When pacman eats all gray pixels (reaches the goal), game ends in a win
+int goal = 0;
+
 // Number of ghosts
 int num_of_ghosts = 3;
 int *x_ghost, *y_ghost;
 int *ghost_dir;
 
 // Var to keep score of game
-int game_over = 0;
+unsigned char game_over = 0;
+
+
 
 void create_map()
 {
 	for (int i = 0; i < 21; ++i) {
 		for (int j = 0; j < 21; ++j) {
 		    if (mazeMatrix[i][j] == 1) {
-		        maze.at<cv::Vec3b>(i, j) = cv::Vec3b(255, 255, 255); // White
+		        maze.at<cv::Vec3b>(i, j) =  cv::Vec3b(160, 160, 160); // Gray
+		        
+		        // Count all gray pixels
+		        goal++;
 		    }
 		}
 	}
 }
+
 
 
 void create_object(int *target_x, int *target_y, int r, int g, int b)
@@ -76,7 +87,7 @@ void create_object(int *target_x, int *target_y, int r, int g, int b)
 		local_x = std::rand() % 21;
 		local_y = std::rand() % 21;
 	}
-	while(maze.at<cv::Vec3b>(local_x, local_y) != cv::Vec3b(255, 255, 255)); 
+	while(maze.at<cv::Vec3b>(local_x, local_y) != cv::Vec3b(160, 160, 160)); 
 	// this checks if the pixel is white or not, which avoids edge case of generating object on the same pixel
 	
 	maze.at<cv::Vec3b>(local_x, local_y) = cv::Vec3b(r, g, b); 
@@ -88,10 +99,17 @@ void create_object(int *target_x, int *target_y, int r, int g, int b)
 int move_pacman()
 {
 	// Wait for a key press
-	int key = cv::waitKey(100);
-	//std::cout << key << std::endl;
+	int key = cv::waitKey(300);
+	
 	// Reset the old pixel to white
 	maze.at<cv::Vec3b>(x, y) = cv::Vec3b(255, 255, 255); 
+	
+	// Update mazeMatrix so that everyone (ghosts) knows pacman visited this pixel
+	if(mazeMatrix[x][y] == 1)
+	{
+		mazeMatrix[x][y] = -1;
+		goal--;
+	}
 
 	// Check the pressed key
 	switch (key) {
@@ -143,7 +161,8 @@ void move_ghosts()
 	for(int i = 0; i < num_of_ghosts; i++)
 	{
 		// Reset the old pixel to white
-		maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(255, 255, 255); 
+		if(mazeMatrix[x_ghost[i]][y_ghost[i]] == 1) maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(160, 160, 160); // Gray pixel stays gray
+		else maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(255, 255, 255); // White pixel
 		
 		switch(ghost_dir[i])
 		{
@@ -197,6 +216,12 @@ int check_game()
 	//std::cout << "MOVE\n";
 	//std::cout << "x= " << x << " y= " << y << std::endl;
 	
+	if(goal == 0)
+	{
+		game_over = 2; // Code for win is 2
+		return 0;
+	}
+	
 	for(int i = 0; i < num_of_ghosts; i++)
 	{
 	//	std::cout << "Ghost " << i << ": x= " << x_ghost[i] << " y= " << y_ghost[i] << std::endl;
@@ -239,92 +264,57 @@ int main(int argc, char** argv )
 	// Create window for game
 	cv::namedWindow("pacman", cv::WINDOW_NORMAL);
 	cv::resizeWindow("pacman", 1080, 720); // set to 1080x720 HD
-	cv::imshow("pacman", maze);
 	
 	// Game
-	/*do
+	do
 	{	
+		if(!check_game()) break;
 		cv::imshow("pacman", maze);	
 		move_ghosts();	
-		if(!check_game()) break;
 	}
-	while(move_pacman());*/
+	while(move_pacman());
 	
-	#pragma omp parallel sections num_threads(4) shared(maze, game_over)
+	/*
+	# pragma omp parallel num_threads(2)
 	{
-	
-	#pragma omp section
-	{
-		while(!game_over)
+		while(check_game())
 		{
-			#pragma omp critical
-			{
-			cv::imshow("pacman", maze);
+			//std::cout << omp_get_thread_num() << std::endl;	
+			//int key = cv::waitKey(300);
+			if(omp_get_thread_num() == 0) 
+			{	
+				int key1= cv::waitKey(100);
+				cv::imshow("pacman", maze);	
+				move_ghosts();		
+				//std::cout << omp_get_thread_num() << std::endl;		
 			}
-			cv::waitKey(100); 
-			std::cout << "screen refresh" << std::endl;
-		}
-	}
-	
-	
-	#pragma omp section
-	{
-		while(true)
-		{
-			#pragma omp critical
+			else if(omp_get_thread_num() == 1) 
 			{
-			if(!move_pacman()) game_over = 1;
+				int key = cv::waitKey(0);
+				move_pacman(key); 
+				//std::cout << omp_get_thread_num() << std::endl;	
 			}
-			cv::waitKey(100); 
-			std::cout << "pacman" << std::endl;
 		}
 	}
-	
-	
-	#pragma omp section
-	{
-		while(!game_over)
-		{
-			#pragma omp critical
-			{
-			move_ghosts();
-			}
-			cv::waitKey(300); 
-			std::cout << "ghosts" << std::endl;
-		}
-	}
-	
-	
-	#pragma omp section
-	{
-		while(!game_over)
-		{
-			#pragma omp critical
-			{
-			check_game();
-			}	
-			cv::waitKey(100); 
-			std::cout << "check" << std::endl;
-		}
-	}
-	
-	}	
-		
-	
-	
+	*/
 	
 	// Game is over, pacman was eaten
 	// Display GAME OVER and wait for key ESC or to shut down window
-	if(game_over)
+	if(game_over == 1)
 	{
-		cv::Mat gameover_mat = cv::imread("./gameover.jpg", cv::IMREAD_COLOR);
+		cv::Mat gameover_mat = cv::imread("./include/gameover.jpg", cv::IMREAD_COLOR);
 		cv::imshow("pacman", gameover_mat);
-		
-		while(1)
-		{
-			int key = cv::waitKey(0);
-			if(key == 27 || cv::getWindowProperty("pacman", cv::WND_PROP_AUTOSIZE) == -1) break;
-		}
+	}
+	else
+	{
+		cv::Mat win_mat = cv::imread("./include/win.png", cv::IMREAD_COLOR);
+		cv::imshow("pacman", win_mat);
+	}
+	
+	while(1)
+	{
+		int key = cv::waitKey(0);
+		if(key == 27 || cv::getWindowProperty("pacman", cv::WND_PROP_AUTOSIZE) == -1) break;
 	}
 	
 
