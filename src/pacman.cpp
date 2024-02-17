@@ -18,10 +18,9 @@
 //using namespace cv;
 //using namespace std;
 
-//#define RANDOM_GHOSTS
+#define RANDOM_GHOSTS
 
 #define MAZE_SIZE	21
-
 
 int mazeMatrix[MAZE_SIZE][MAZE_SIZE] = {
 	{0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0},
@@ -58,7 +57,7 @@ cv::Mat maze(21, 21, CV_8UC3, cv::Scalar(0,0,0));
 int goal = 0;
 
 // Number of ghosts
-int num_of_ghosts = 3;
+int num_of_ghosts;
 int *x_ghost, *y_ghost;
 int *ghost_dir;
 
@@ -102,50 +101,53 @@ void create_object(int *target_x, int *target_y, int r, int g, int b)
 
 int move_pacman()
 {
-	// Wait for a key press
-	int key = cv::waitKey(300);
-	
-	// Update mazeMatrix so that everyone (ghosts) knows pacman visited this pixel
-	if(mazeMatrix[x][y] == 1)
+	int local_x, local_y;
+	#pragma omp critical
 	{
-		#pragma omp critical // I think not necesseary because ghosts dont care about 1 or -1
-		{
-			mazeMatrix[x][y] = -1;
-		}
-		goal--;
+		local_x = x;
+		local_y = y;
 	}
+	
+	// Wait for a key press
+	int key = cv::waitKey(1);
+	
+	// GOAL!!!!!!!
 
 	// Check the pressed key
 	switch (key) {
 	case 27: // ESC key
+		#pragma omp critical
+		{
+			game_over = 1;
+		}
 		return 0;
 	
 	case 'w':
 	case 'W':
 	case 82: // Up arrow key
-		if(x > 0 && mazeMatrix[x-1][y] != 0) x--;
-		else if(x == 0 && mazeMatrix[MAZE_SIZE-1][y] != 0) x = MAZE_SIZE-1; // Make pacman loop from top to bottom
+		if(local_x > 0 && mazeMatrix[local_x-1][local_y] != 0) local_x--;
+		else if(local_x == 0 && mazeMatrix[MAZE_SIZE-1][local_y] != 0) local_x = MAZE_SIZE-1; // Make pacman loop from top to bottom
 	break;
 
 	case 's':
 	//case 'S':
 	case 84: // Down arrow key
-		if(x < MAZE_SIZE-1 && mazeMatrix[x+1][y] != 0) x++;
-		else if(x == MAZE_SIZE-1 && mazeMatrix[0][y] != 0) x = 0;
+		if(local_x < MAZE_SIZE-1 && mazeMatrix[local_x+1][local_y] != 0) local_x++;
+		else if(local_x == MAZE_SIZE-1 && mazeMatrix[0][local_y] != 0) local_x = 0;
 	break;
 
 	case 'a':
 	case 'A':
 	case 81: // Left arrow key
-		if (y > 0  && mazeMatrix[x][y-1] != 0) y--;
-		else if(y == 0 && mazeMatrix[x][MAZE_SIZE-1] != 0) y = MAZE_SIZE-1;
+		if (local_y > 0  && mazeMatrix[local_x][local_y-1] != 0) local_y--;
+		else if(local_y == 0 && mazeMatrix[local_x][MAZE_SIZE-1] != 0) local_y = MAZE_SIZE-1;
 	break;
 
 	case 'd':
 	case 'D':
 	case 83: // Right arrow key
-		if (y < MAZE_SIZE-1  && mazeMatrix[x][y+1] != 0) y++;
-		else if(y == MAZE_SIZE-1 && mazeMatrix[x][0] != 0) y = 0;
+		if (local_y < MAZE_SIZE-1  && mazeMatrix[local_x][local_y+1] != 0) local_y++;
+		else if(local_y == MAZE_SIZE-1 && mazeMatrix[local_x][0] != 0) local_y = 0;
 	break;
 
 	default:
@@ -160,81 +162,93 @@ int move_pacman()
 		}
 	break;
 	}
+	
+	#pragma omp critical
+	{
+		x = local_x;
+		y = local_y;
+	}
 
 	return 1;
 }
 
 
-void move_ghosts()
+void move_ghosts(int i)
 {
-	for(int i = 0; i < num_of_ghosts; i++)
-	{	
-		switch(ghost_dir[i])
-		{
-		case 0: // UP
-			if(x_ghost[i] > 0 && mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0) x_ghost[i]--; // Move ghost up one pixel
-			else if(x_ghost[i] == 0 && mazeMatrix[MAZE_SIZE-1][y_ghost[i]] != 0) x_ghost[i] = MAZE_SIZE-1; // Loop ghost from top to bottom
-			
-			#ifdef RANDOM_GHOSTS
-			else ghost_dir[i] = 1 + rand() % 3;
-			#else
-			// if none is available, find new direction based on pixels around you
-			else if(mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0)  ghost_dir[i] = 3; // ghost can move left
-			else if(mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0)  ghost_dir[i] = 1; // ghost can move right
-			else ghost_dir[i] = 2;
-			#endif
-		break;
+	switch(ghost_dir[i])
+	{
+	case 0: // UP
+		if(x_ghost[i] > 0 && mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0) x_ghost[i]--; // Move ghost up one pixel
+		else if(x_ghost[i] == 0 && mazeMatrix[MAZE_SIZE-1][y_ghost[i]] != 0) x_ghost[i] = MAZE_SIZE-1; // Loop ghost from top to bottom
 		
-		case 1: // RIGHT
-			if(y_ghost[i] < MAZE_SIZE-1 && mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0) y_ghost[i]++;
-			else if(y_ghost[i] == MAZE_SIZE-1 && mazeMatrix[x_ghost[i]][0] != 0) y_ghost[i] = 0;
-			
-			#ifdef RANDOM_GHOSTS
-			else ghost_dir[i] = rand() % 4;
-			#else
-			else if(mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0)  ghost_dir[i] = 0; // ghost can move up
-			else if(mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0)  ghost_dir[i] = 2;
-			else ghost_dir[i] = 3;
-			#endif
-		break;
+		#ifdef RANDOM_GHOSTS
+		else ghost_dir[i] = 1 + rand() % 3;
+		#else
+		// if none is available, find new direction based on pixels around you
+		else if(mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0)  ghost_dir[i] = 3; // ghost can move left
+		else if(mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0)  ghost_dir[i] = 1; // ghost can move right
+		else ghost_dir[i] = 2;
+		#endif
+	break;
+	
+	case 1: // RIGHT
+		if(y_ghost[i] < MAZE_SIZE-1 && mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0) y_ghost[i]++;
+		else if(y_ghost[i] == MAZE_SIZE-1 && mazeMatrix[x_ghost[i]][0] != 0) y_ghost[i] = 0;
 		
-		case 2: // DOWN
-			if(x_ghost[i] < MAZE_SIZE-1 && mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0) x_ghost[i]++;
-			else if(x_ghost[i] == MAZE_SIZE-1 && mazeMatrix[0][y_ghost[i]] != 0) x_ghost[i] = 0;
-			
-			#ifdef RANDOM_GHOSTS
-			else ghost_dir[i] = rand() % 4;
-			#else
-			else if(mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0)  ghost_dir[i] = 3; // ghost can move left
-			else if(mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0)  ghost_dir[i] = 1; // ghost can move right
-			else ghost_dir[i] = 0;
-			#endif
-		break;
+		#ifdef RANDOM_GHOSTS
+		else ghost_dir[i] = rand() % 4;
+		#else
+		else if(mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0)  ghost_dir[i] = 0; // ghost can move up
+		else if(mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0)  ghost_dir[i] = 2;
+		else ghost_dir[i] = 3;
+		#endif
+	break;
+	
+	case 2: // DOWN
+		if(x_ghost[i] < MAZE_SIZE-1 && mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0) x_ghost[i]++;
+		else if(x_ghost[i] == MAZE_SIZE-1 && mazeMatrix[0][y_ghost[i]] != 0) x_ghost[i] = 0;
 		
-		case 3: // LEFT
-			if(y_ghost[i] > 0 && mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0) y_ghost[i]--;
-			else if(y_ghost[i] == 0 && mazeMatrix[x_ghost[i]][MAZE_SIZE-1] != 0) y_ghost[i] = MAZE_SIZE-1;
-			
-			#ifdef RANDOM_GHOSTS
-			else ghost_dir[i] = rand() % 3;
-			#else
-			else if(mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0)  ghost_dir[i] = 0; // ghost can move up
-			else if(mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0)  ghost_dir[i] = 2;
-			else ghost_dir[i] = 1;
-			#endif
-		break;
+		#ifdef RANDOM_GHOSTS
+		else ghost_dir[i] = rand() % 4;
+		#else
+		else if(mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0)  ghost_dir[i] = 3; // ghost can move left
+		else if(mazeMatrix[x_ghost[i]][y_ghost[i]+1] != 0)  ghost_dir[i] = 1; // ghost can move right
+		else ghost_dir[i] = 0;
+		#endif
+	break;
+	
+	case 3: // LEFT
+		if(y_ghost[i] > 0 && mazeMatrix[x_ghost[i]][y_ghost[i]-1] != 0) y_ghost[i]--;
+		else if(y_ghost[i] == 0 && mazeMatrix[x_ghost[i]][MAZE_SIZE-1] != 0) y_ghost[i] = MAZE_SIZE-1;
 		
-		default:
-			ghost_dir[i] = 0;
-		break;
-		}
-		
+		#ifdef RANDOM_GHOSTS
+		else ghost_dir[i] = rand() % 3;
+		#else
+		else if(mazeMatrix[x_ghost[i]-1][y_ghost[i]] != 0)  ghost_dir[i] = 0; // ghost can move up
+		else if(mazeMatrix[x_ghost[i]+1][y_ghost[i]] != 0)  ghost_dir[i] = 2;
+		else ghost_dir[i] = 1;
+		#endif
+	break;
+	
+	default:
+		ghost_dir[i] = 0;
+	break;
 	}
 }
 
 
 void update_maze()
 {
+	int local_x, local_y;
+	int count_visited = 0;
+	#pragma omp critical
+	{
+		local_x = x;
+		local_y = y;
+	}
+	
+	mazeMatrix[local_x][local_y] = -1;
+	
 	for (int i = 0; i < 21; ++i) {
 		for (int j = 0; j < 21; ++j) {
 		    if (mazeMatrix[i][j] == 1) {
@@ -243,12 +257,13 @@ void update_maze()
 		    
 		    if (mazeMatrix[i][j] == -1) {
 		        maze.at<cv::Vec3b>(i, j) = cv::Vec3b(255, 255, 255); // White
+		        count_visited++;
 		    }
 		}
 	}
 	
 	// Draw pacman
-	maze.at<cv::Vec3b>(x, y) = cv::Vec3b(255, 0, 0); 
+	maze.at<cv::Vec3b>(local_x, local_y) = cv::Vec3b(255, 0, 0); 
 	
 	// Draw ghosts
 	for(int i =0; i < num_of_ghosts; i++)
@@ -256,15 +271,21 @@ void update_maze()
 		maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(255, 0, 255); 
 	}
 	
+	if(count_visited == goal)
+	{
+	#pragma omp critical
+	{
+		game_over = 2;
+	}
+	}
+	
 	cv::imshow("pacman", maze);	
 }
 
 
+
 int check_game()
 {
-	//std::cout << "MOVE\n";
-	//std::cout << "x= " << x << " y= " << y << std::endl;
-	
 	int local_gm = 0;
 	
 	if(goal == 0)
@@ -275,15 +296,12 @@ int check_game()
 	
 	for(int i = 0; i < num_of_ghosts; i++)
 	{
-	//	std::cout << "Ghost " << i << ": x= " << x_ghost[i] << " y= " << y_ghost[i] << std::endl;
 		if(x_ghost[i] == x && y_ghost[i] == y) 
 		{
 			local_gm = 1;
 			//return 0;
 		}
 	}
-	
-	//std::cout<< std::endl;
 	
 	#pragma omp critical
 	{
@@ -306,6 +324,7 @@ int main(int argc, char** argv )
 	
 	// Create ghosts
 	//num_of_ghosts = atoi(argv[1]);
+	num_of_ghosts = 3;
 	x_ghost = new int[num_of_ghosts];
 	y_ghost = new int[num_of_ghosts];
 	ghost_dir = new int[num_of_ghosts];
@@ -321,7 +340,7 @@ int main(int argc, char** argv )
 	cv::resizeWindow("pacman", 1080, 720); // set to 1080x720 HD
 	
 	// Game
-	
+	/*
 	do
 	{	
 		if(check_game()) break;
@@ -329,41 +348,87 @@ int main(int argc, char** argv )
 		move_ghosts();	
 	}
 	while(move_pacman());
+	*/
+	int count = 0;
 	
-	/*
-	# pragma omp parallel sections num_threads(4) shared(maze, mazeMatrix, game_over)
+	// Allow netsed parallism
+	omp_set_nested(1);
+	
+	// num_of_ghosts + 3, one for each: display, moving pacman and checking game validity
+	#pragma omp parallel sections num_threads(num_of_ghosts+3) shared(game_over, x, y, count) firstprivate(mazeMatrix, maze, x_ghost, y_ghost, ghost_dir, goal)
 	{
-		#pragma omp section
+		#pragma omp parallel num_threads(num_of_ghosts) shared(count)
 		{
-			while(!game_over)
+			int local_count;
+			#pragma omp critical
 			{
+				local_count = count++;
+			}	
+			// implied flush
+			while(true)
+			{
+				int local_gm;
 				#pragma omp critical
 				{
-					cv::imshow("pacman", maze);	
-				}
+					local_gm = game_over;
+				}			
+				if(local_gm) break;
+				
+				move_ghosts(local_count);	
+				usleep(200000); // 200ms delay
 			}
 		}
 		
 		#pragma omp section
 		{
-			while(!check_game());
-		}
-		
-		
-		#pragma omp section
-		{
-			while(!game_over)
+			while(true)
 			{
-				move_ghosts();	
-				if(!move_pacman()) break;
+				int local_gm;
+				#pragma omp critical
+				{
+					local_gm = game_over;
+				}		
+				if(local_gm) break;
+					
+				update_maze();
+				//usleep(20000);
 			}
 		}
+		
+		#pragma omp section
+		{
+			while(true)
+			{
+				int local_gm;
+				#pragma omp critical
+				{
+					local_gm = game_over;
+				}
+				if(local_gm) break;
+				
+				move_pacman();
+			}
+		}
+		
+		#pragma omp section
+		{
+			while(true)
+			{
+				int local_gm;
+				#pragma omp critical
+				{
+					local_gm = game_over;
+				}
+				if(local_gm) break;
+				
+				check_game();
+			}
+		}
+		
 	}
-	*/
-	
+
 	// Game is over, pacman was eaten
 	// Display GAME OVER and wait for key ESC or to shut down window
-	
 	
 	if(game_over)
 	{
@@ -385,6 +450,5 @@ int main(int argc, char** argv )
 		}
 	}
 	
-
     return 0;
 }
