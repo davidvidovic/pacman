@@ -15,12 +15,11 @@
 // For OMP
 #include <omp.h>
 
-//using namespace cv;
-//using namespace std;
-
-#define RANDOM_GHOSTS
+// Set this define in order to have ghosts move in random directions
+//#define RANDOM_GHOSTS
 
 #define MAZE_SIZE	21
+
 
 int mazeMatrix[MAZE_SIZE][MAZE_SIZE] = {
 	{0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0},
@@ -109,9 +108,7 @@ int move_pacman()
 	}
 	
 	// Wait for a key press
-	int key = cv::waitKey(1);
-	
-	// GOAL!!!!!!!
+	int key = cv::waitKey(10);
 
 	// Check the pressed key
 	switch (key) {
@@ -237,6 +234,32 @@ void move_ghosts(int i)
 }
 
 
+int check_game()
+{
+	int local_gm = 0;
+	
+	if(goal == 0)
+	{
+		local_gm = 2; // Code for win is 2
+		//return 0;
+	}
+	
+	for(int i = 0; i < num_of_ghosts; i++)
+	{
+		if(x_ghost[i] == x && y_ghost[i] == y) 
+		{
+			local_gm = 1;
+			//return 0;
+		}
+	}
+	
+	#pragma omp critical
+	{
+		game_over = local_gm;
+	}
+	return local_gm;
+}
+
 void update_maze()
 {
 	int local_x, local_y;
@@ -268,7 +291,10 @@ void update_maze()
 	// Draw ghosts
 	for(int i =0; i < num_of_ghosts; i++)
 	{
-		maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(255, 0, 255); 
+		#pragma omp critcal
+		{
+			maze.at<cv::Vec3b>(x_ghost[i], y_ghost[i]) = cv::Vec3b(255, 0, 255); 
+		}
 	}
 	
 	if(count_visited == goal)
@@ -280,35 +306,11 @@ void update_maze()
 	}
 	
 	cv::imshow("pacman", maze);	
+	//check_game();
 }
 
 
 
-int check_game()
-{
-	int local_gm = 0;
-	
-	if(goal == 0)
-	{
-		local_gm = 2; // Code for win is 2
-		//return 0;
-	}
-	
-	for(int i = 0; i < num_of_ghosts; i++)
-	{
-		if(x_ghost[i] == x && y_ghost[i] == y) 
-		{
-			local_gm = 1;
-			//return 0;
-		}
-	}
-	
-	#pragma omp critical
-	{
-		game_over = local_gm;
-	}
-	return local_gm;
-}
 
 
 
@@ -355,9 +357,9 @@ int main(int argc, char** argv )
 	omp_set_nested(1);
 	
 	// num_of_ghosts + 3, one for each: display, moving pacman and checking game validity
-	#pragma omp parallel sections num_threads(num_of_ghosts+3) shared(game_over, x, y, count) firstprivate(mazeMatrix, maze, x_ghost, y_ghost, ghost_dir, goal)
-	{
-		#pragma omp parallel num_threads(num_of_ghosts) shared(count)
+	#pragma omp parallel sections 
+	{	
+		#pragma omp parallel num_threads(num_of_ghosts) 
 		{
 			int local_count;
 			#pragma omp critical
@@ -365,9 +367,10 @@ int main(int argc, char** argv )
 				local_count = count++;
 			}	
 			// implied flush
+			
+			int local_gm;
 			while(true)
 			{
-				int local_gm;
 				#pragma omp critical
 				{
 					local_gm = game_over;
@@ -376,14 +379,15 @@ int main(int argc, char** argv )
 				
 				move_ghosts(local_count);	
 				usleep(200000); // 200ms delay
+				std::cout << omp_get_thread_num() << "  GHOST" << local_count << "	on level: " << omp_get_level() << " and my parent is " << omp_get_ancestor_thread_num(omp_get_level()-1) << std::endl;
 			}
 		}
-		
+
 		#pragma omp section
 		{
+			int local_gm;
 			while(true)
 			{
-				int local_gm;
 				#pragma omp critical
 				{
 					local_gm = game_over;
@@ -391,15 +395,16 @@ int main(int argc, char** argv )
 				if(local_gm) break;
 					
 				update_maze();
-				//usleep(20000);
+				std::cout << omp_get_thread_num() << "  MAZE UPDATE	on level: " << omp_get_level() << std::endl;
+				usleep(20000);
 			}
 		}
 		
 		#pragma omp section
 		{
+			int local_gm;
 			while(true)
 			{
-				int local_gm;
 				#pragma omp critical
 				{
 					local_gm = game_over;
@@ -407,27 +412,30 @@ int main(int argc, char** argv )
 				if(local_gm) break;
 				
 				move_pacman();
+				std::cout << omp_get_thread_num() << "  MOVE PACMAN	on level: " << omp_get_level() << std::endl;
 			}
 		}
 		
 		#pragma omp section
 		{
+			int local_gm;
 			while(true)
-			{
-				int local_gm;
+			{	
 				#pragma omp critical
 				{
 					local_gm = game_over;
 				}
 				if(local_gm) break;
-				
+				usleep(15000);
 				check_game();
+				
+				std::cout << omp_get_thread_num() << "  CHECK GAME 	on level: " << omp_get_level() << std::endl;
 			}
 		}
 		
 	}
 
-	// Game is over, pacman was eaten
+	// Game is over, pacman was eaten or pacman won
 	// Display GAME OVER and wait for key ESC or to shut down window
 	
 	if(game_over)
